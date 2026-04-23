@@ -1,0 +1,31 @@
+# Database
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment variables
+.env
+
+# Uploads (user-uploaded files)
+uploads/
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# Deploy artifacts
+deploy.zip
+
+# Large sample data file (>100 MB — exceeds GitHub limit)
+8451_The_Complete_Journey_2_Sample-2/400_transactions.csv

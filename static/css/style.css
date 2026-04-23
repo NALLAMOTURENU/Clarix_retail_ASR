@@ -1,0 +1,55 @@
+/* ── Global ── */
+body {
+  background: #f4f6fb;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ── KPI cards ── */
+.kpi-card { transition: transform .15s; }
+.kpi-card:hover { transform: translateY(-3px); }
+
+.kpi-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  flex-shrink: 0;
+}
+
+/* ── Navbar active link ── */
+.navbar .nav-link.active {
+  font-weight: 600;
+  border-bottom: 2px solid #fff;
+}
+
+/* ── Cards ── */
+.card { border-radius: 12px; }
+.card-header { border-radius: 12px 12px 0 0 !important; }
+
+/* ── Table ── */
+.table thead th { font-size: .78rem; letter-spacing: .03em; }
+
+/* ── Purple badge (not in Bootstrap by default) ── */
+.badge.bg-purple { background-color: #7b1fa2 !important; }
+.text-purple { color: #7b1fa2 !important; }
+
+/* ── Scrollable table wrapper ── */
+.table-responsive { border-radius: 0 0 12px 12px; }
+
+/* ── Section divider label ── */
+.section-label {
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #6c757d;
+  border-left: 3px solid #9c27b0;
+  padding-left: 8px;
+  margin: 1.5rem 0 .75rem;
+}
+
+/* ── Login / Register ── */
+.card.shadow-lg { border-radius: 16px; overflow: hidden; }

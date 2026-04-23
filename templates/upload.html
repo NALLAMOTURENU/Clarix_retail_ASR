@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Load Data{% endblock %}
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-cloud-upload me-2"></i>Data Loading</h2>
+
+<!-- Current record counts -->
+<div class="row g-3 mb-4">
+  {% for label, key, icon in [('Households','households','house-fill'),
+                               ('Transactions','transactions','receipt'),
+                               ('Products','products','box-seam')] %}
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body d-flex align-items-center gap-3">
+        <div class="fs-1 text-primary"><i class="bi bi-{{ icon }}"></i></div>
+        <div>
+          <div class="text-muted small">{{ label }}</div>
+          <div class="fs-4 fw-bold">{{ counts[key] | int | format_number if counts[key] else counts[key] }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="row g-4">
+  <!-- Load default sample data -->
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold bg-primary text-white">
+        <i class="bi bi-lightning-fill me-1"></i> Quick Load (Sample Data)
+      </div>
+      <div class="card-body">
+        <p class="text-muted">Load the bundled 400-household sample dataset from the server.</p>
+        <form method="get" action="{{ url_for('upload') }}">
+          <input type="hidden" name="load_default" value="1" />
+          <button type="submit" class="btn btn-primary w-100">
+            <i class="bi bi-database-fill-up me-1"></i> Load Default CSVs
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload custom CSVs -->
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold bg-success text-white">
+        <i class="bi bi-upload me-1"></i> Upload New CSV Files
+      </div>
+      <div class="card-body">
+        <form method="post" enctype="multipart/form-data">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Households CSV</label>
+            <input type="file" name="households" class="form-control" accept=".csv" required />
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Transactions CSV</label>
+            <input type="file" name="transactions" class="form-control" accept=".csv" required />
+          </div>
+          <div class="mb-4">
+            <label class="form-label fw-semibold">Products CSV</label>
+            <input type="file" name="products" class="form-control" accept=".csv" required />
+          </div>
+          <button type="submit" class="btn btn-success w-100">
+            <i class="bi bi-cloud-arrow-up me-1"></i> Upload &amp; Load
+          </button>
+        </form>
+        <div class="mt-3 text-muted small">
+          <i class="bi bi-info-circle"></i>
+          Uploading replaces all existing data. Transactions file may take a minute for large files.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

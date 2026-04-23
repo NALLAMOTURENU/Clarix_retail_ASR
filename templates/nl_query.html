@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Natural Language Query{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center gap-2 mb-1">
+  <h2 class="mb-0"><i class="bi bi-chat-dots me-2"></i>Natural Language Query</h2>
+  <span class="badge text-white ms-1" style="background:#4285f4;font-size:.7rem;">
+    Gemini 2.5 Flash
+  </span>
+</div>
+<p class="text-muted mb-4">
+  Ask questions in plain English — Gemini translates them into SQL and runs them
+  against the retail database instantly.
+</p>
+
+{% if not api_key_set %}
+<div class="alert alert-warning d-flex align-items-start gap-2">
+  <i class="bi bi-exclamation-triangle-fill fs-5 mt-1"></i>
+  <div>
+    <strong>Gemini API key not configured.</strong><br>
+    Set your key before starting the server:<br>
+    <code>export GEMINI_API_KEY="your-key-here"</code><br>
+    Then restart: <code>python run.py</code>
+  </div>
+</div>
+{% endif %}
+
+<div class="row g-4">
+
+  <!-- Left: Query box -->
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <form method="post" id="nlForm">
+          <label class="form-label fw-semibold fs-6">
+            <i class="bi bi-search me-1"></i> Ask a question about the retail data
+          </label>
+          <div class="input-group input-group-lg mb-3">
+            <textarea name="question" id="questionInput" rows="2"
+                      class="form-control"
+                      placeholder="e.g. Which households with children spend the most on organic products?"
+                      {{ 'disabled' if not api_key_set }}>{{ question }}</textarea>
+          </div>
+          <button type="submit" class="btn btn-primary px-4"
+                  id="submitBtn" {{ 'disabled' if not api_key_set }}>
+            <i class="bi bi-send me-1"></i> Run Query
+          </button>
+          {% if question %}
+          <a href="{{ url_for('nl_query') }}" class="btn btn-outline-secondary ms-2">
+            <i class="bi bi-x-circle me-1"></i> Clear
+          </a>
+          {% endif %}
+        </form>
+      </div>
+    </div>
+
+    <!-- Generated SQL -->
+    {% if sql %}
+    <div class="card border-0 shadow-sm mt-3">
+      <div class="card-header d-flex align-items-center justify-content-between bg-dark text-white py-2">
+        <span class="small fw-semibold"><i class="bi bi-code-slash me-1"></i>Generated SQL</span>
+        <button class="btn btn-sm btn-outline-light py-0" onclick="copySQL()">
+          <i class="bi bi-clipboard me-1"></i>Copy
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <pre id="sqlBlock" class="m-0 p-3 bg-dark text-success"
+             style="border-radius:0 0 12px 12px;font-size:.82rem;overflow-x:auto;">{{ sql }}</pre>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Error -->
+    {% if error %}
+    <div class="alert alert-danger mt-3 d-flex gap-2 align-items-start">
+      <i class="bi bi-x-octagon-fill fs-5 mt-1"></i>
+      <div><strong>Error:</strong> {{ error }}</div>
+    </div>
+    {% endif %}
+
+    <!-- Results table -->
+    {% if result %}
+    <div class="card border-0 shadow-sm mt-3">
+      <div class="card-header bg-transparent d-flex align-items-center justify-content-between">
+        <span class="fw-semibold">
+          <i class="bi bi-table me-1 text-success"></i> Results
+        </span>
+        <span class="badge bg-success">{{ result.count }} row{{ 's' if result.count != 1 }}</span>
+      </div>
+      {% if result.count == 0 %}
+      <div class="card-body text-muted">No rows returned.</div>
+      {% else %}
+      <div class="card-body p-0">
+        <div class="table-responsive" style="max-height:420px;">
+          <table class="table table-sm table-striped table-hover mb-0 small">
+            <thead class="table-dark sticky-top">
+              <tr>
+                {% for col in result.columns %}
+                <th>{{ col }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in result.rows %}
+              <tr>
+                {% for cell in row %}
+                <td>{{ cell if cell is not none else '—' }}</td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Right: Example queries -->
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold bg-transparent border-bottom">
+        <i class="bi bi-lightbulb text-warning me-1"></i> Example Questions
+      </div>
+      <div class="list-group list-group-flush" id="exampleList">
+        {% for ex in examples %}
+        <button type="button"
+                class="list-group-item list-group-item-action small py-2 example-btn"
+                onclick="setQuestion(this)">
+          <i class="bi bi-arrow-right-circle me-1 text-primary"></i>{{ ex }}
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Schema reference -->
+    <div class="card border-0 shadow-sm mt-3">
+      <div class="card-header fw-semibold bg-transparent border-bottom">
+        <i class="bi bi-diagram-3 me-1 text-info"></i> Schema Reference
+      </div>
+      <div class="card-body p-2 small">
+        {% for tbl, cols in [
+          ('households',   'hshd_num, loyalty_flag, age_range, marital, income_range, homeowner, hshd_composition, hh_size, children'),
+          ('transactions', 'basket_num, hshd_num, purchase_date, product_num, spend, units, store_region, week_num, year'),
+          ('products',     'product_num, department, commodity, brand_type, natural_organic_flag'),
+        ] %}
+        <div class="mb-2">
+          <span class="badge bg-primary">{{ tbl }}</span><br>
+          <span class="text-muted" style="font-size:.72rem;">{{ cols }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function setQuestion(btn) {
+  document.getElementById('questionInput').value = btn.textContent.trim().replace(/^.*?→/, '').trim();
+  document.getElementById('questionInput').focus();
+}
+
+function copySQL() {
+  const sql = document.getElementById('sqlBlock').textContent;
+  navigator.clipboard.writeText(sql).then(() => {
+    const btn = event.target.closest('button');
+    btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Copied!';
+    setTimeout(() => btn.innerHTML = '<i class="bi bi-clipboard me-1"></i>Copy', 2000);
+  });
+}
+
+// Show spinner on submit
+document.getElementById('nlForm').addEventListener('submit', function() {
+  const btn = document.getElementById('submitBtn');
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Thinking…';
+  btn.disabled = true;
+});
+</script>
+{% endblock %}

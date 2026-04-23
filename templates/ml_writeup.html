@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}ML Write-up & CLV{% endblock %}
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-file-text me-2"></i>ML Models Write-up &amp; CLV Prediction</h2>
+
+<!-- Model descriptions -->
+<div class="row g-4 mb-5">
+  <!-- Linear Regression -->
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header fw-bold text-white" style="background:#1565c0;">
+        <i class="bi bi-graph-up-arrow me-1"></i> Linear Regression
+      </div>
+      <div class="card-body">
+        <p>
+          <strong>Linear Regression</strong> models the relationship between a continuous
+          target variable and one or more predictors by fitting a straight line (or hyperplane)
+          that minimises the sum of squared residuals.
+        </p>
+        <p>
+          <strong>Strengths:</strong> Highly interpretable — coefficients directly quantify
+          each feature's impact. Fast to train, works well when relationships are approximately
+          linear.
+        </p>
+        <p>
+          <strong>Limitations:</strong> Assumes linearity and is sensitive to outliers;
+          may underfit complex non-linear patterns common in retail spend data.
+        </p>
+        <p class="mb-0">
+          <strong>CLV application:</strong> Predicts a household's total future spend from
+          RFM (Recency, Frequency, Monetary) features and demographics as a baseline model.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Random Forest -->
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header fw-bold text-white" style="background:#6a1b9a;">
+        <i class="bi bi-tree me-1"></i> Random Forest
+      </div>
+      <div class="card-body">
+        <p>
+          <strong>Random Forest</strong> is an ensemble of decision trees, each trained on a
+          random bootstrap sample and a random feature subset.  Final predictions are averaged
+          (regression) or voted (classification) across all trees.
+        </p>
+        <p>
+          <strong>Strengths:</strong> Handles non-linear interactions and high-dimensional
+          features naturally; robust to outliers; built-in feature importance scores.
+        </p>
+        <p>
+          <strong>Limitations:</strong> Less interpretable than a single tree; can be slow
+          to train on very large datasets; may overfit noisy data without tuning.
+        </p>
+        <p class="mb-0">
+          <strong>CLV application:</strong> Captures non-linear relationships between
+          household size, income, and spending patterns that Linear Regression misses.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gradient Boosting -->
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header fw-bold text-white" style="background:#1b5e20;">
+        <i class="bi bi-lightning-fill me-1"></i> Gradient Boosting
+      </div>
+      <div class="card-body">
+        <p>
+          <strong>Gradient Boosting</strong> builds trees sequentially; each new tree corrects
+          the residual errors of the ensemble so far by descending the gradient of the loss
+          function.
+        </p>
+        <p>
+          <strong>Strengths:</strong> Often achieves the highest predictive accuracy of the
+          three; handles mixed feature types; built-in regularisation (learning rate,
+          subsampling).
+        </p>
+        <p>
+          <strong>Limitations:</strong> More hyperparameters to tune than Random Forest;
+          sequential nature means longer training times; can overfit if the learning rate is
+          too high.
+        </p>
+        <p class="mb-0">
+          <strong>CLV application:</strong> Best model when accuracy matters most — e.g.,
+          prioritising the top 10% of high-value customers for targeted promotions.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CLV results -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header fw-bold fs-5 bg-transparent border-bottom">
+    <i class="bi bi-currency-dollar me-1 text-warning"></i>
+    Customer Lifetime Value (CLV) — Model Comparison
+  </div>
+  <div class="card-body">
+    <p class="text-muted">
+      CLV is estimated by predicting each household's <strong>total spend</strong> using
+      RFM features (Recency, Frequency, Monetary) and demographics (income, household size,
+      children, loyalty flag). The dataset is split 75 % / 25 % train / test.
+    </p>
+
+    {% if clv_results %}
+    <div class="row g-3 mb-4">
+      {% for res in clv_results %}
+      {% set color = ['primary','purple','success'][loop.index0] %}
+      <div class="col-md-4">
+        <div class="card border-0 shadow-sm text-center">
+          <div class="card-body">
+            <div class="fs-6 fw-bold mb-2">{{ res.model }}</div>
+            <div class="display-6 fw-bold text-{{ color }}">{{ res.r2 }}</div>
+            <div class="text-muted small mb-2">R² Score</div>
+            <div class="fs-5 fw-semibold">${{ "{:,.2f}".format(res.rmse) }}</div>
+            <div class="text-muted small">RMSE</div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <canvas id="clvChart" height="50"></canvas>
+    {% else %}
+    <div class="alert alert-warning">
+      <i class="bi bi-exclamation-triangle me-1"></i>
+      No data available — please load the dataset via
+      <a href="{{ url_for('upload') }}">Load Data</a> first.
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <h5><i class="bi bi-lightbulb me-1 text-warning"></i>Business Insight</h5>
+    <p>
+      High-CLV households can be identified using Gradient Boosting predictions. Kroger can
+      use these scores to prioritise personalised coupon offers, loyalty tier upgrades, and
+      targeted email campaigns — focusing retention budget on customers who generate the most
+      long-term revenue.
+    </p>
+    <p class="mb-0">
+      Low-CLV but high-frequency households represent cross-sell opportunities: they visit
+      often but spend little per trip, suggesting they may shop other retailers for major
+      categories.
+    </p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if clv_results %}
+<script>
+const clvData = {{ clv_results | tojson }};
+new Chart(document.getElementById('clvChart'), {
+  type: 'bar',
+  data: {
+    labels: clvData.map(d => d.model),
+    datasets: [
+      {
+        label: 'R² Score',
+        data: clvData.map(d => d.r2),
+        backgroundColor: ['#3f51b5','#9c27b0','#4caf50'],
+        yAxisID: 'y1',
+      },
+      {
+        label: 'RMSE ($)',
+        data: clvData.map(d => d.rmse),
+        backgroundColor: ['rgba(63,81,181,0.3)','rgba(156,39,176,0.3)','rgba(76,175,80,0.3)'],
+        yAxisID: 'y2',
+        type: 'line',
+        borderColor: '#ff9800',
+        borderWidth: 2,
+        pointRadius: 5,
+      }
+    ]
+  },
+  options: {
+    scales: {
+      y1: { type: 'linear', position: 'left',  title: { display: true, text: 'R²' } },
+      y2: { type: 'linear', position: 'right', title: { display: true, text: 'RMSE ($)' }, grid: { drawOnChartArea: false } }
+    }
+  }
+});
+</script>
+{% endif %}
+{% endblock %}
