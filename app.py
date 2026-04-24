@@ -495,6 +495,9 @@ def ml_writeup():
             LEFT JOIN households h ON t.hshd_num = h.hshd_num
         """, get_engine())
 
+    if len(df) > 5000:
+        df = df.sample(5000, random_state=42)
+
     clv_results = None
     if not df.empty:
         df['purchase_date'] = pd.to_datetime(df['purchase_date'], errors='coerce')
@@ -519,21 +522,14 @@ def ml_writeup():
 
         if len(X) > 30:
             X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.25, random_state=42)
-            sc = StandardScaler()
-            X_tr_s = sc.fit_transform(X_tr)
-            X_te_s = sc.transform(X_te)
 
             models = {
-                'Linear Regression':  LinearRegression(),
-                'Random Forest':      RandomForestRegressor(n_estimators=100, random_state=42),
-                'Gradient Boosting':  GradientBoostingRegressor(n_estimators=100, random_state=42),
+                'Random Forest': RandomForestRegressor(n_estimators=50, random_state=42),
             }
             clv_results = []
             for name, mdl in models.items():
-                fit_X = X_tr_s if name == 'Linear Regression' else X_tr
-                prd_X = X_te_s if name == 'Linear Regression' else X_te
-                mdl.fit(fit_X, y_tr)
-                preds = mdl.predict(prd_X)
+                mdl.fit(X_tr, y_tr)
+                preds = mdl.predict(X_te)
                 rmse = round(np.sqrt(mean_squared_error(y_te, preds)), 2)
                 r2   = round(r2_score(y_te, preds), 4)
                 clv_results.append({'model': name, 'rmse': rmse, 'r2': r2})
