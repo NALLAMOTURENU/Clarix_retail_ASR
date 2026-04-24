@@ -488,13 +488,12 @@ def api_children_spend():
 @app.route('/ml-writeup')
 @login_required
 def ml_writeup():
-    with get_engine().connect() as conn:
-        df = pd.read_sql(text("""
+    df = pd.read_sql("""
             SELECT t.hshd_num, t.purchase_date, t.spend, t.basket_num,
                    h.income_range, h.hh_size, h.children, h.loyalty_flag
             FROM   transactions t
             LEFT JOIN households h ON t.hshd_num = h.hshd_num
-        """), conn)
+        """, get_engine())
 
     clv_results = None
     if not df.empty:
@@ -546,13 +545,12 @@ def ml_writeup():
 @app.route('/basket-analysis')
 @login_required
 def basket_analysis():
-    with get_engine().connect() as conn:
-        df = pd.read_sql(text("""
+    df = pd.read_sql("""
             SELECT t.basket_num, p.commodity
             FROM   transactions t
             JOIN   products p ON t.product_num = p.product_num
             WHERE  p.commodity IS NOT NULL AND p.commodity NOT IN ('None','')
-        """), conn)
+        """, get_engine())
 
     if df.empty:
         return render_template('basket_analysis.html',
@@ -622,14 +620,13 @@ def basket_analysis():
 @app.route('/churn-prediction')
 @login_required
 def churn_prediction():
-    with get_engine().connect() as conn:
-        df = pd.read_sql(text("""
+    df = pd.read_sql("""
             SELECT t.hshd_num, t.purchase_date, t.spend, t.basket_num,
                    h.loyalty_flag, h.age_range, h.income_range,
                    h.hh_size, h.children, h.marital, h.homeowner
             FROM   transactions t
             LEFT JOIN households h ON t.hshd_num = h.hshd_num
-        """), conn)
+        """, get_engine())
 
     if df.empty:
         return render_template('churn.html', error="No data loaded yet.")
