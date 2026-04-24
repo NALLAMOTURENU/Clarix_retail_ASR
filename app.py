@@ -488,15 +488,15 @@ def api_children_spend():
 @app.route('/ml-writeup')
 @login_required
 def ml_writeup():
-    df = pd.read_sql("""
-            SELECT t.hshd_num, t.purchase_date, t.spend, t.basket_num,
+    top   = "TOP 5000" if AZURE else ""
+    limit = "" if AZURE else "LIMIT 5000"
+    df = pd.read_sql(f"""
+            SELECT {top} t.hshd_num, t.purchase_date, t.spend, t.basket_num,
                    h.income_range, h.hh_size, h.children, h.loyalty_flag
             FROM   transactions t
             LEFT JOIN households h ON t.hshd_num = h.hshd_num
+            {limit}
         """, get_engine())
-
-    if len(df) > 5000:
-        df = df.sample(5000, random_state=42)
 
     clv_results = None
     if not df.empty:
@@ -541,11 +541,14 @@ def ml_writeup():
 @app.route('/basket-analysis')
 @login_required
 def basket_analysis():
-    df = pd.read_sql("""
-            SELECT t.basket_num, p.commodity
+    top   = "TOP 5000" if AZURE else ""
+    limit = "" if AZURE else "LIMIT 5000"
+    df = pd.read_sql(f"""
+            SELECT {top} t.basket_num, p.commodity
             FROM   transactions t
             JOIN   products p ON t.product_num = p.product_num
             WHERE  p.commodity IS NOT NULL AND p.commodity NOT IN ('None','')
+            {limit}
         """, get_engine())
 
     if df.empty:
@@ -616,12 +619,15 @@ def basket_analysis():
 @app.route('/churn-prediction')
 @login_required
 def churn_prediction():
-    df = pd.read_sql("""
-            SELECT t.hshd_num, t.purchase_date, t.spend, t.basket_num,
+    top   = "TOP 5000" if AZURE else ""
+    limit = "" if AZURE else "LIMIT 5000"
+    df = pd.read_sql(f"""
+            SELECT {top} t.hshd_num, t.purchase_date, t.spend, t.basket_num,
                    h.loyalty_flag, h.age_range, h.income_range,
                    h.hh_size, h.children, h.marital, h.homeowner
             FROM   transactions t
             LEFT JOIN households h ON t.hshd_num = h.hshd_num
+            {limit}
         """, get_engine())
 
     if df.empty:
