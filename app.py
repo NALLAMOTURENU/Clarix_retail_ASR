@@ -679,8 +679,8 @@ def churn_prediction():
     seg_age      = churn_by('age_range')
 
     freq_bins = list(range(0, int(rfm['frequency'].max()) + 15, 5))
-    mon_bins  = [0,200,400,600,800,1000,1500,2000,3000,5000,
-                 int(rfm['monetary'].max())+1]
+    mon_max   = max(int(rfm['monetary'].max()) + 1, 1001)
+    mon_bins  = [0, 200, 400, 600, 800, 1000, mon_max]
 
     def hist_data(col, bins):
         active  = rfm[rfm['churned']==0][col]
