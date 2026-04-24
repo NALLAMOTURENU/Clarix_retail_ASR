@@ -3,7 +3,6 @@ import json
 import re
 from dotenv import load_dotenv
 load_dotenv()
-import sqlite3
 import hashlib
 import warnings
 import pandas as pd
@@ -15,6 +14,8 @@ from flask import (Flask, render_template, request, redirect,
                    url_for, flash, session, jsonify)
 from werkzeug.utils import secure_filename
 import google.genai as genai
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import IntegrityError
 
 warnings.filterwarnings('ignore')
 
@@ -37,6 +38,9 @@ DATA_DIR   = os.path.join(BASE_DIR, '8451_The_Complete_Journey_2_Sample-2')
 UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# True when Azure SQL env vars are present
+AZURE = bool(os.environ.get('AZURE_SQL_SERVER'))
+
 # ─── Jinja2 filter ───────────────────────────────────────────────────────────
 @app.template_filter('format_number')
 def format_number(value):
@@ -46,23 +50,44 @@ def format_number(value):
         return value
 
 # ─── Database helpers ─────────────────────────────────────────────────────────
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+_engine = None
+
+def get_engine():
+    global _engine
+    if _engine is None:
+        if AZURE:
+            server = os.getenv('AZURE_SQL_SERVER')
+            db     = os.getenv('AZURE_SQL_DB')
+            user   = os.getenv('AZURE_SQL_USER')
+            pwd    = os.getenv('AZURE_SQL_PASS')
+            url = (
+                f"mssql+pyodbc://{user}:{pwd}@{server}/{db}"
+                f"?driver=ODBC+Driver+18+for+SQL+Server"
+                f"&Encrypt=yes&TrustServerCertificate=no"
+            )
+        else:
+            url = f"sqlite:///{DB_PATH}"
+        _engine = create_engine(url, pool_pre_ping=True)
+    return _engine
+
+
+def _rows(result):
+    """Convert SQLAlchemy CursorResult rows to list of dicts."""
+    return [dict(r._mapping) for r in result.fetchall()]
 
 
 def init_db():
-    conn = get_db()
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS users (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            username     TEXT UNIQUE NOT NULL,
-            email        TEXT UNIQUE NOT NULL,
+    if AZURE:
+        return  # Tables already created via Azure portal (Step 2)
+    stmts = [
+        """CREATE TABLE IF NOT EXISTS users (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            username      TEXT UNIQUE NOT NULL,
+            email         TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS households (
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS households (
             hshd_num         INTEGER PRIMARY KEY,
             loyalty_flag     TEXT,
             age_range        TEXT,
@@ -72,15 +97,15 @@ def init_db():
             hshd_composition TEXT,
             hh_size          TEXT,
             children         TEXT
-        );
-        CREATE TABLE IF NOT EXISTS products (
+        )""",
+        """CREATE TABLE IF NOT EXISTS products (
             product_num          TEXT PRIMARY KEY,
             department           TEXT,
             commodity            TEXT,
             brand_type           TEXT,
             natural_organic_flag TEXT
-        );
-        CREATE TABLE IF NOT EXISTS transactions (
+        )""",
+        """CREATE TABLE IF NOT EXISTS transactions (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             basket_num    TEXT,
             hshd_num      INTEGER,
@@ -91,13 +116,14 @@ def init_db():
             store_region  TEXT,
             week_num      INTEGER,
             year          INTEGER
-        );
-        CREATE INDEX IF NOT EXISTS idx_tx_hshd    ON transactions(hshd_num);
-        CREATE INDEX IF NOT EXISTS idx_tx_product ON transactions(product_num);
-        CREATE INDEX IF NOT EXISTS idx_tx_basket  ON transactions(basket_num);
-    """)
-    conn.commit()
-    conn.close()
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_tx_hshd    ON transactions(hshd_num)",
+        "CREATE INDEX IF NOT EXISTS idx_tx_product ON transactions(product_num)",
+        "CREATE INDEX IF NOT EXISTS idx_tx_basket  ON transactions(basket_num)",
+    ]
+    with get_engine().begin() as conn:
+        for stmt in stmts:
+            conn.execute(text(stmt))
 
 
 def _clean_df(df):
@@ -109,11 +135,12 @@ def _clean_df(df):
 
 
 def load_csv_to_db(hh_path, tx_path, prod_path):
-    conn = get_db()
-    conn.execute("DELETE FROM transactions")
-    conn.execute("DELETE FROM households")
-    conn.execute("DELETE FROM products")
-    conn.commit()
+    engine = get_engine()
+
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM transactions"))
+        conn.execute(text("DELETE FROM households"))
+        conn.execute(text("DELETE FROM products"))
 
     # ── Households ──
     hh = _clean_df(pd.read_csv(hh_path, skipinitialspace=True))
@@ -126,7 +153,7 @@ def load_csv_to_db(hh_path, tx_path, prod_path):
     hh = hh.rename(columns=hh_map)
     keep = [c for c in ['hshd_num','loyalty_flag','age_range','marital','income_range',
                          'homeowner','hshd_composition','hh_size','children'] if c in hh.columns]
-    hh[keep].to_sql('households', conn, if_exists='append', index=False)
+    hh[keep].to_sql('households', engine, if_exists='append', index=False)
 
     # ── Products ──
     prod = _clean_df(pd.read_csv(prod_path, skipinitialspace=True))
@@ -139,7 +166,7 @@ def load_csv_to_db(hh_path, tx_path, prod_path):
     keep = [c for c in ['product_num','department','commodity','brand_type',
                          'natural_organic_flag'] if c in prod.columns]
     prod[keep].drop_duplicates(subset=['product_num']).to_sql(
-        'products', conn, if_exists='append', index=False)
+        'products', engine, if_exists='append', index=False)
 
     # ── Transactions (chunked) ──
     total = 0
@@ -155,10 +182,9 @@ def load_csv_to_db(hh_path, tx_path, prod_path):
         keep = [c for c in ['basket_num','hshd_num','purchase_date','product_num',
                               'spend','units','store_region','week_num','year']
                 if c in chunk.columns]
-        chunk[keep].to_sql('transactions', conn, if_exists='append', index=False)
+        chunk[keep].to_sql('transactions', engine, if_exists='append', index=False)
         total += len(chunk)
 
-    conn.close()
     return total
 
 
@@ -190,12 +216,12 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '').strip()
-        conn = get_db()
-        user = conn.execute(
-            'SELECT * FROM users WHERE username=? AND password_hash=?',
-            (username, hash_pw(password))
-        ).fetchone()
-        conn.close()
+        with get_engine().connect() as conn:
+            rows = _rows(conn.execute(
+                text('SELECT * FROM users WHERE username=:u AND password_hash=:h'),
+                {'u': username, 'h': hash_pw(password)}
+            ))
+        user = rows[0] if rows else None
         if user:
             session['user_id'] = user['id']
             session['username'] = user['username']
@@ -215,16 +241,14 @@ def register():
             flash('All fields are required.', 'danger')
             return render_template('register.html')
         try:
-            conn = get_db()
-            conn.execute(
-                'INSERT INTO users (username, email, password_hash) VALUES (?,?,?)',
-                (username, email, hash_pw(password))
-            )
-            conn.commit()
-            conn.close()
+            with get_engine().begin() as conn:
+                conn.execute(
+                    text('INSERT INTO users (username, email, password_hash) VALUES (:u, :e, :h)'),
+                    {'u': username, 'e': email, 'h': hash_pw(password)}
+                )
             flash('Account created! Please log in.', 'success')
             return redirect(url_for('login'))
-        except sqlite3.IntegrityError:
+        except IntegrityError:
             flash('Username or email already exists.', 'danger')
     return render_template('register.html')
 
@@ -275,13 +299,12 @@ def upload():
             flash('Default CSV files not found on server.', 'danger')
         return redirect(url_for('upload'))
 
-    conn = get_db()
-    counts = {
-        'households':   conn.execute('SELECT COUNT(*) FROM households').fetchone()[0],
-        'transactions': conn.execute('SELECT COUNT(*) FROM transactions').fetchone()[0],
-        'products':     conn.execute('SELECT COUNT(*) FROM products').fetchone()[0],
-    }
-    conn.close()
+    with get_engine().connect() as conn:
+        counts = {
+            'households':   conn.execute(text('SELECT COUNT(*) FROM households')).scalar() or 0,
+            'transactions': conn.execute(text('SELECT COUNT(*) FROM transactions')).scalar() or 0,
+            'products':     conn.execute(text('SELECT COUNT(*) FROM products')).scalar() or 0,
+        }
     return render_template('upload.html', counts=counts)
 
 
@@ -295,9 +318,11 @@ def data_pull():
     except ValueError:
         hshd_num = 10
 
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT  t.hshd_num, t.basket_num, t.purchase_date, t.product_num,
+    top   = "TOP 1000" if AZURE else ""
+    limit = "" if AZURE else "LIMIT 1000"
+
+    query = f"""
+        SELECT  {top} t.hshd_num, t.basket_num, t.purchase_date, t.product_num,
                 p.department, p.commodity, t.spend, t.units,
                 t.store_region, t.week_num, t.year,
                 h.loyalty_flag, h.age_range, h.marital, h.income_range,
@@ -305,12 +330,13 @@ def data_pull():
         FROM   transactions t
         LEFT JOIN households h ON t.hshd_num  = h.hshd_num
         LEFT JOIN products   p ON t.product_num = p.product_num
-        WHERE  t.hshd_num = ?
+        WHERE  t.hshd_num = :n
         ORDER  BY t.hshd_num, t.basket_num, t.purchase_date,
                   t.product_num, p.department, p.commodity
-        LIMIT  1000
-    """, (hshd_num,)).fetchall()
-    conn.close()
+        {limit}
+    """
+    with get_engine().connect() as conn:
+        rows = _rows(conn.execute(text(query), {'n': hshd_num}))
     return render_template('data_pull.html', rows=rows, hshd_num=hshd_num)
 
 
@@ -318,28 +344,26 @@ def data_pull():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    conn = get_db()
-    stats = {
-        'households':   conn.execute('SELECT COUNT(*) FROM households').fetchone()[0],
-        'transactions': conn.execute('SELECT COUNT(*) FROM transactions').fetchone()[0],
-        'products':     conn.execute('SELECT COUNT(*) FROM products').fetchone()[0],
-        'total_spend':  conn.execute('SELECT ROUND(SUM(spend),2) FROM transactions').fetchone()[0] or 0,
-    }
-    conn.close()
+    with get_engine().connect() as conn:
+        stats = {
+            'households':   conn.execute(text('SELECT COUNT(*) FROM households')).scalar() or 0,
+            'transactions': conn.execute(text('SELECT COUNT(*) FROM transactions')).scalar() or 0,
+            'products':     conn.execute(text('SELECT COUNT(*) FROM products')).scalar() or 0,
+            'total_spend':  conn.execute(text('SELECT ROUND(SUM(spend),2) FROM transactions')).scalar() or 0,
+        }
     return render_template('dashboard.html', stats=stats)
 
 
 @app.route('/api/spending-over-time')
 @login_required
 def api_spending_over_time():
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT year, week_num, ROUND(SUM(spend),2) AS total
-        FROM   transactions
-        GROUP  BY year, week_num
-        ORDER  BY year, week_num
-    """).fetchall()
-    conn.close()
+    with get_engine().connect() as conn:
+        rows = _rows(conn.execute(text("""
+            SELECT year, week_num, ROUND(SUM(spend),2) AS total
+            FROM   transactions
+            GROUP  BY year, week_num
+            ORDER  BY year, week_num
+        """)))
     buckets = {}
     for r in rows:
         key = f"{r['year']}-M{(r['week_num']-1)//4+1:02d}"
@@ -350,16 +374,17 @@ def api_spending_over_time():
 @app.route('/api/top-commodities')
 @login_required
 def api_top_commodities():
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT p.commodity, ROUND(SUM(t.spend),2) AS total
-        FROM   transactions t
-        JOIN   products p ON t.product_num = p.product_num
-        WHERE  p.commodity IS NOT NULL AND p.commodity NOT IN ('None','')
-        GROUP  BY p.commodity
-        ORDER  BY total DESC LIMIT 15
-    """).fetchall()
-    conn.close()
+    top   = "TOP 15" if AZURE else ""
+    limit = "" if AZURE else "LIMIT 15"
+    with get_engine().connect() as conn:
+        rows = _rows(conn.execute(text(f"""
+            SELECT {top} p.commodity, ROUND(SUM(t.spend),2) AS total
+            FROM   transactions t
+            JOIN   products p ON t.product_num = p.product_num
+            WHERE  p.commodity IS NOT NULL AND p.commodity NOT IN ('None','')
+            GROUP  BY p.commodity
+            ORDER  BY total DESC {limit}
+        """)))
     return jsonify({'labels': [r['commodity'] for r in rows],
                     'values': [r['total']     for r in rows]})
 
@@ -367,24 +392,23 @@ def api_top_commodities():
 @app.route('/api/demographics')
 @login_required
 def api_demographics():
-    conn = get_db()
-    inc = conn.execute("""
-        SELECT h.income_range, ROUND(AVG(s.total),2) AS avg_spend
-        FROM   households h
-        JOIN   (SELECT hshd_num, SUM(spend) AS total FROM transactions GROUP BY hshd_num) s
-               ON h.hshd_num = s.hshd_num
-        WHERE  h.income_range IS NOT NULL AND h.income_range NOT IN ('None','')
-        GROUP  BY h.income_range ORDER BY avg_spend DESC
-    """).fetchall()
-    sz = conn.execute("""
-        SELECT h.hh_size, ROUND(AVG(s.total),2) AS avg_spend
-        FROM   households h
-        JOIN   (SELECT hshd_num, SUM(spend) AS total FROM transactions GROUP BY hshd_num) s
-               ON h.hshd_num = s.hshd_num
-        WHERE  h.hh_size IS NOT NULL AND h.hh_size NOT IN ('None','')
-        GROUP  BY h.hh_size ORDER BY h.hh_size
-    """).fetchall()
-    conn.close()
+    with get_engine().connect() as conn:
+        inc = _rows(conn.execute(text("""
+            SELECT h.income_range, ROUND(AVG(s.total),2) AS avg_spend
+            FROM   households h
+            JOIN   (SELECT hshd_num, SUM(spend) AS total FROM transactions GROUP BY hshd_num) s
+                   ON h.hshd_num = s.hshd_num
+            WHERE  h.income_range IS NOT NULL AND h.income_range NOT IN ('None','')
+            GROUP  BY h.income_range ORDER BY avg_spend DESC
+        """)))
+        sz = _rows(conn.execute(text("""
+            SELECT h.hh_size, ROUND(AVG(s.total),2) AS avg_spend
+            FROM   households h
+            JOIN   (SELECT hshd_num, SUM(spend) AS total FROM transactions GROUP BY hshd_num) s
+                   ON h.hshd_num = s.hshd_num
+            WHERE  h.hh_size IS NOT NULL AND h.hh_size NOT IN ('None','')
+            GROUP  BY h.hh_size ORDER BY h.hh_size
+        """)))
     return jsonify({
         'income': {'labels': [r['income_range'] for r in inc], 'values': [r['avg_spend'] for r in inc]},
         'size':   {'labels': [r['hh_size']      for r in sz],  'values': [r['avg_spend'] for r in sz]},
@@ -394,15 +418,14 @@ def api_demographics():
 @app.route('/api/brand-preference')
 @login_required
 def api_brand_preference():
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT p.brand_type, ROUND(SUM(t.spend),2) AS total
-        FROM   transactions t
-        JOIN   products p ON t.product_num = p.product_num
-        WHERE  p.brand_type IS NOT NULL AND p.brand_type NOT IN ('None','')
-        GROUP  BY p.brand_type
-    """).fetchall()
-    conn.close()
+    with get_engine().connect() as conn:
+        rows = _rows(conn.execute(text("""
+            SELECT p.brand_type, ROUND(SUM(t.spend),2) AS total
+            FROM   transactions t
+            JOIN   products p ON t.product_num = p.product_num
+            WHERE  p.brand_type IS NOT NULL AND p.brand_type NOT IN ('None','')
+            GROUP  BY p.brand_type
+        """)))
     return jsonify({'labels': [r['brand_type'] for r in rows],
                     'values': [r['total']       for r in rows]})
 
@@ -410,16 +433,15 @@ def api_brand_preference():
 @app.route('/api/regional-stats')
 @login_required
 def api_regional_stats():
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT store_region,
-               ROUND(SUM(spend),2)          AS total_spend,
-               COUNT(DISTINCT hshd_num)     AS hh_count
-        FROM   transactions
-        WHERE  store_region IS NOT NULL AND store_region NOT IN ('None','')
-        GROUP  BY store_region ORDER BY total_spend DESC
-    """).fetchall()
-    conn.close()
+    with get_engine().connect() as conn:
+        rows = _rows(conn.execute(text("""
+            SELECT store_region,
+                   ROUND(SUM(spend),2)          AS total_spend,
+                   COUNT(DISTINCT hshd_num)     AS hh_count
+            FROM   transactions
+            WHERE  store_region IS NOT NULL AND store_region NOT IN ('None','')
+            GROUP  BY store_region ORDER BY total_spend DESC
+        """)))
     return jsonify({'labels':     [r['store_region'] for r in rows],
                     'spend':      [r['total_spend']  for r in rows],
                     'households': [r['hh_count']     for r in rows]})
@@ -428,18 +450,17 @@ def api_regional_stats():
 @app.route('/api/loyalty-stats')
 @login_required
 def api_loyalty_stats():
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT h.loyalty_flag,
-               ROUND(AVG(s.total),2)    AS avg_spend,
-               COUNT(DISTINCT h.hshd_num) AS hh_count
-        FROM   households h
-        JOIN   (SELECT hshd_num, SUM(spend) AS total FROM transactions GROUP BY hshd_num) s
-               ON h.hshd_num = s.hshd_num
-        WHERE  h.loyalty_flag IS NOT NULL AND h.loyalty_flag NOT IN ('None','')
-        GROUP  BY h.loyalty_flag
-    """).fetchall()
-    conn.close()
+    with get_engine().connect() as conn:
+        rows = _rows(conn.execute(text("""
+            SELECT h.loyalty_flag,
+                   ROUND(AVG(s.total),2)      AS avg_spend,
+                   COUNT(DISTINCT h.hshd_num) AS hh_count
+            FROM   households h
+            JOIN   (SELECT hshd_num, SUM(spend) AS total FROM transactions GROUP BY hshd_num) s
+                   ON h.hshd_num = s.hshd_num
+            WHERE  h.loyalty_flag IS NOT NULL AND h.loyalty_flag NOT IN ('None','')
+            GROUP  BY h.loyalty_flag
+        """)))
     return jsonify({'labels': [r['loyalty_flag'] for r in rows],
                     'values': [r['avg_spend']    for r in rows],
                     'counts': [r['hh_count']     for r in rows]})
@@ -448,18 +469,17 @@ def api_loyalty_stats():
 @app.route('/api/children-spend')
 @login_required
 def api_children_spend():
-    conn = get_db()
-    rows = conn.execute("""
-        SELECT h.children,
-               ROUND(AVG(s.total),2) AS avg_spend,
-               COUNT(DISTINCT h.hshd_num) AS hh_count
-        FROM   households h
-        JOIN   (SELECT hshd_num, SUM(spend) AS total FROM transactions GROUP BY hshd_num) s
-               ON h.hshd_num = s.hshd_num
-        WHERE  h.children IS NOT NULL AND h.children NOT IN ('None','')
-        GROUP  BY h.children
-    """).fetchall()
-    conn.close()
+    with get_engine().connect() as conn:
+        rows = _rows(conn.execute(text("""
+            SELECT h.children,
+                   ROUND(AVG(s.total),2)      AS avg_spend,
+                   COUNT(DISTINCT h.hshd_num) AS hh_count
+            FROM   households h
+            JOIN   (SELECT hshd_num, SUM(spend) AS total FROM transactions GROUP BY hshd_num) s
+                   ON h.hshd_num = s.hshd_num
+            WHERE  h.children IS NOT NULL AND h.children NOT IN ('None','')
+            GROUP  BY h.children
+        """)))
     return jsonify({'labels': [r['children']  for r in rows],
                     'values': [r['avg_spend'] for r in rows]})
 
@@ -468,14 +488,13 @@ def api_children_spend():
 @app.route('/ml-writeup')
 @login_required
 def ml_writeup():
-    conn = get_db()
-    df = pd.read_sql("""
-        SELECT t.hshd_num, t.purchase_date, t.spend, t.basket_num,
-               h.income_range, h.hh_size, h.children, h.loyalty_flag
-        FROM   transactions t
-        LEFT JOIN households h ON t.hshd_num = h.hshd_num
-    """, conn)
-    conn.close()
+    with get_engine().connect() as conn:
+        df = pd.read_sql(text("""
+            SELECT t.hshd_num, t.purchase_date, t.spend, t.basket_num,
+                   h.income_range, h.hh_size, h.children, h.loyalty_flag
+            FROM   transactions t
+            LEFT JOIN households h ON t.hshd_num = h.hshd_num
+        """), conn)
 
     clv_results = None
     if not df.empty:
@@ -527,14 +546,13 @@ def ml_writeup():
 @app.route('/basket-analysis')
 @login_required
 def basket_analysis():
-    conn = get_db()
-    df = pd.read_sql("""
-        SELECT t.basket_num, p.commodity
-        FROM   transactions t
-        JOIN   products p ON t.product_num = p.product_num
-        WHERE  p.commodity IS NOT NULL AND p.commodity NOT IN ('None','')
-    """, conn)
-    conn.close()
+    with get_engine().connect() as conn:
+        df = pd.read_sql(text("""
+            SELECT t.basket_num, p.commodity
+            FROM   transactions t
+            JOIN   products p ON t.product_num = p.product_num
+            WHERE  p.commodity IS NOT NULL AND p.commodity NOT IN ('None','')
+        """), conn)
 
     if df.empty:
         return render_template('basket_analysis.html',
@@ -604,15 +622,14 @@ def basket_analysis():
 @app.route('/churn-prediction')
 @login_required
 def churn_prediction():
-    conn = get_db()
-    df = pd.read_sql("""
-        SELECT t.hshd_num, t.purchase_date, t.spend, t.basket_num,
-               h.loyalty_flag, h.age_range, h.income_range,
-               h.hh_size, h.children, h.marital, h.homeowner
-        FROM   transactions t
-        LEFT JOIN households h ON t.hshd_num = h.hshd_num
-    """, conn)
-    conn.close()
+    with get_engine().connect() as conn:
+        df = pd.read_sql(text("""
+            SELECT t.hshd_num, t.purchase_date, t.spend, t.basket_num,
+                   h.loyalty_flag, h.age_range, h.income_range,
+                   h.hh_size, h.children, h.marital, h.homeowner
+            FROM   transactions t
+            LEFT JOIN households h ON t.hshd_num = h.hshd_num
+        """), conn)
 
     if df.empty:
         return render_template('churn.html', error="No data loaded yet.")
@@ -755,7 +772,7 @@ def churn_prediction():
 
 
 # ─── Natural Language Query (Gemini 2.5 Flash) ───────────────────────────────
-DB_SCHEMA = """
+_DB_SCHEMA_SQLITE = """
 Tables in the SQLite database:
 
 households(hshd_num INTEGER, loyalty_flag TEXT, age_range TEXT, marital TEXT,
@@ -770,15 +787,41 @@ products(product_num TEXT, department TEXT, commodity TEXT,
          brand_type TEXT, natural_organic_flag TEXT)
 
 Relationships:
-  transactions.hshd_num  → households.hshd_num
+  transactions.hshd_num   → households.hshd_num
   transactions.product_num → products.product_num
 
 Notes:
   - purchase_date is stored as text e.g. '17-AUG-18'
-  - loyalty_flag values: 'Y' or 'N'
-  - brand_type values: 'PRIVATE' or 'NATIONAL'
-  - natural_organic_flag values: 'Y' or 'N'
-  - store_region examples: 'CENTRAL', 'EAST', 'SOUTH', 'WEST'
+  - Use LIMIT n at the end of the query to restrict rows.
+  - loyalty_flag: 'Y' or 'N' | brand_type: 'PRIVATE' or 'NATIONAL'
+  - natural_organic_flag: 'Y' or 'N'
+  - store_region: 'CENTRAL', 'EAST', 'SOUTH', 'WEST'
+"""
+
+_DB_SCHEMA_AZURE = """
+Tables in the Azure SQL (T-SQL) database:
+
+households(hshd_num INT, loyalty_flag VARCHAR, age_range VARCHAR, marital VARCHAR,
+           income_range VARCHAR, homeowner VARCHAR, hshd_composition VARCHAR,
+           hh_size VARCHAR, children VARCHAR)
+
+transactions(id INT, basket_num INT, hshd_num INT, purchase_date DATE,
+             product_num INT, spend FLOAT, units INT, store_region VARCHAR,
+             week_num INT, year INT)
+
+products(product_num INT, department VARCHAR, commodity VARCHAR,
+         brand_type VARCHAR, natural_organic_flag VARCHAR)
+
+Relationships:
+  transactions.hshd_num   → households.hshd_num
+  transactions.product_num → products.product_num
+
+Notes:
+  - This is T-SQL (SQL Server). Use SELECT TOP n ... — never use LIMIT.
+  - purchase_date is a DATE column.
+  - loyalty_flag: 'Y' or 'N' | brand_type: 'PRIVATE' or 'NATIONAL'
+  - natural_organic_flag: 'Y' or 'N'
+  - store_region: 'CENTRAL', 'EAST', 'SOUTH', 'WEST'
 """
 
 BLOCKED = re.compile(
@@ -786,34 +829,33 @@ BLOCKED = re.compile(
     re.IGNORECASE
 )
 
+
 def nl_to_sql(question: str) -> str:
     api_key = os.environ.get('GEMINI_API_KEY', '')
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable is not set.")
 
-    client = genai.Client(api_key=api_key)
+    schema  = _DB_SCHEMA_AZURE if AZURE else _DB_SCHEMA_SQLITE
+    dialect = "T-SQL (SQL Server)" if AZURE else "SQLite"
 
+    client = genai.Client(api_key=api_key)
     prompt = f"""You are an expert SQL assistant for a retail analytics database.
 
-{DB_SCHEMA}
+{schema}
 
-Convert the following plain-English question into a single, valid SQLite SELECT query.
+Convert the following plain-English question into a single, valid {dialect} SELECT query.
 Rules:
 - Return ONLY the raw SQL query, no markdown, no explanation, no code fences.
 - Use only SELECT statements. No INSERT, UPDATE, DELETE, DROP or DDL.
 - Always use LEFT JOIN when joining tables so missing data doesn't drop rows.
 - Limit results to 200 rows unless the user specifies otherwise.
 - Use ROUND(..., 2) for monetary values.
-- Use UPPER() for case-insensitive text comparisons where appropriate.
 
 Question: {question}
 
 SQL:"""
 
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt,
-    )
+    response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
     sql = response.text.strip()
     sql = re.sub(r'^```sql\s*', '', sql, flags=re.IGNORECASE)
     sql = re.sub(r'^```\s*',    '', sql)
@@ -824,11 +866,10 @@ SQL:"""
 @app.route('/nl-query', methods=['GET', 'POST'])
 @login_required
 def nl_query():
-    result = None
-    sql    = None
+    result   = None
+    sql      = None
     question = ''
-    error  = None
-
+    error    = None
     api_key_set = bool(os.environ.get('GEMINI_API_KEY', ''))
 
     if request.method == 'POST':
@@ -840,26 +881,22 @@ def nl_query():
         else:
             try:
                 sql = nl_to_sql(question)
-
                 if BLOCKED.search(sql) or not sql.upper().lstrip().startswith('SELECT'):
                     error = "Generated query was not a SELECT statement and was blocked for safety."
                     sql   = None
                 else:
-                    conn = get_db()
-                    try:
-                        rows = conn.execute(sql).fetchall()
-                        if rows:
-                            cols   = rows[0].keys()
-                            result = {'columns': list(cols),
-                                      'rows':    [list(r) for r in rows],
-                                      'count':   len(rows)}
-                        else:
-                            result = {'columns': [], 'rows': [], 'count': 0}
-                    except Exception as db_err:
-                        error = f"SQL execution error: {db_err}"
-                    finally:
-                        conn.close()
-
+                    with get_engine().connect() as conn:
+                        try:
+                            rows = conn.execute(text(sql)).fetchall()
+                            if rows:
+                                cols   = list(rows[0]._mapping.keys())
+                                result = {'columns': cols,
+                                          'rows':    [list(r) for r in rows],
+                                          'count':   len(rows)}
+                            else:
+                                result = {'columns': [], 'rows': [], 'count': 0}
+                        except Exception as db_err:
+                            error = f"SQL execution error: {db_err}"
             except ValueError as ve:
                 error = str(ve)
             except Exception as e:
@@ -879,11 +916,8 @@ def nl_query():
     ]
 
     return render_template('nl_query.html',
-                           question=question,
-                           sql=sql,
-                           result=result,
-                           error=error,
-                           examples=examples,
+                           question=question, sql=sql, result=result,
+                           error=error, examples=examples,
                            api_key_set=api_key_set)
 
 
