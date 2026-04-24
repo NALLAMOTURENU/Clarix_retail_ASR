@@ -64,10 +64,18 @@ def get_engine():
                 f"mssql+pyodbc://{user}:{pwd}@{server}/{db}"
                 f"?driver=ODBC+Driver+18+for+SQL+Server"
                 f"&Encrypt=yes&TrustServerCertificate=no"
+                f"&Connection+Timeout=60&ConnectRetryCount=3"
+            )
+            _engine = create_engine(
+                url,
+                pool_pre_ping=True,
+                pool_recycle=1800,
+                pool_timeout=60,
+                connect_args={"timeout": 60},
             )
         else:
             url = f"sqlite:///{DB_PATH}"
-        _engine = create_engine(url, pool_pre_ping=True)
+            _engine = create_engine(url, pool_pre_ping=True)
     return _engine
 
 
