@@ -627,15 +627,12 @@ def basket_analysis():
 @app.route('/churn-prediction')
 @login_required
 def churn_prediction():
-    top   = "TOP 5000" if AZURE else ""
-    limit = "" if AZURE else "LIMIT 5000"
-    df = pd.read_sql(f"""
-            SELECT {top} t.hshd_num, t.purchase_date, t.spend, t.basket_num,
+    df = pd.read_sql("""
+            SELECT t.hshd_num, t.purchase_date, t.spend, t.basket_num,
                    h.loyalty_flag, h.age_range, h.income_range,
                    h.hh_size, h.children, h.marital, h.homeowner
             FROM   transactions t
             LEFT JOIN households h ON t.hshd_num = h.hshd_num
-            {limit}
         """, get_engine())
 
     if df.empty:
