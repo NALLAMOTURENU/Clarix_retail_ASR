@@ -23,26 +23,8 @@
 </div>
 
 <div class="row g-4">
-  <!-- Load default sample data -->
-  <div class="col-lg-5">
-    <div class="card border-0 shadow-sm">
-      <div class="card-header fw-semibold bg-primary text-white">
-        <i class="bi bi-lightning-fill me-1"></i> Quick Load (Sample Data)
-      </div>
-      <div class="card-body">
-        <p class="text-muted">Load the bundled 400-household sample dataset from the server.</p>
-        <form method="get" action="{{ url_for('upload') }}">
-          <input type="hidden" name="load_default" value="1" />
-          <button type="submit" class="btn btn-primary w-100">
-            <i class="bi bi-database-fill-up me-1"></i> Load Default CSVs
-          </button>
-        </form>
-      </div>
-    </div>
-  </div>
-
   <!-- Upload custom CSVs -->
-  <div class="col-lg-7">
+  <div class="col-lg-12">
     <div class="card border-0 shadow-sm">
       <div class="card-header fw-semibold bg-success text-white">
         <i class="bi bi-upload me-1"></i> Upload New CSV Files
