@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Basket Analysis{% endblock %}
 {% block content %}
-<h2 class="mb-1"><i class="bi bi-basket me-2"></i>Basket Analysis — Cross-sell Opportunities</h2>
+<h2 class="mb-1"><i class="bi bi-basket me-2"></i>Basket Analysis - Cross-sell Opportunities</h2>
 <p class="text-muted mb-4">
   Requirement 7 · Association Rules + Random Forest model on
   {% if total_baskets %}<strong>{{ "{:,}".format(total_baskets) }}</strong> baskets{% endif %}
@@ -57,7 +57,7 @@
       <strong>Business insight:</strong> Customers who buy
       <strong>{{ rf_results.importances[0].commodity if rf_results.importances else '' }}</strong>
       are the most likely to also buy
-      <strong>{{ rf_results.target }}</strong> — a strong cross-sell pairing.
+      <strong>{{ rf_results.target }}</strong> - a strong cross-sell pairing.
     </div>
   </div>
 </div>
@@ -68,7 +68,7 @@
 <div class="card border-0 shadow-sm">
   <div class="card-header fw-bold bg-transparent border-bottom">
     <i class="bi bi-link-45deg text-primary me-1"></i>
-    Association Rules (min support 0.5%) — Top 30 by Lift
+    Association Rules (min support 0.5%) - Top 30 by Lift
   </div>
   <div class="card-body p-0">
     <div class="table-responsive" style="max-height:500px;">

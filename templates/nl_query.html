@@ -9,7 +9,7 @@
   </span>
 </div>
 <p class="text-muted mb-4">
-  Ask questions in plain English — Gemini translates them into SQL and runs them
+  Ask questions in plain English - Gemini translates them into SQL and runs them
   against the retail database instantly.
 </p>
 
@@ -104,7 +104,7 @@
               {% for row in result.rows %}
               <tr>
                 {% for cell in row %}
-                <td>{{ cell if cell is not none else '—' }}</td>
+                <td>{{ cell if cell is not none else '-' }}</td>
                 {% endfor %}
               </tr>
               {% endfor %}

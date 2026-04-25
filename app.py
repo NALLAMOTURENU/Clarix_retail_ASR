@@ -288,7 +288,7 @@ def upload():
             paths[key] = path
         try:
             total = load_csv_to_db(paths['households'], paths['transactions'], paths['products'])
-            flash(f'Data loaded successfully — {total:,} transaction records.', 'success')
+            flash(f'Data loaded successfully - {total:,} transaction records.', 'success')
         except Exception as e:
             flash(f'Error loading data: {e}', 'danger')
         return redirect(url_for('upload'))
@@ -300,7 +300,7 @@ def upload():
         if all(os.path.exists(p) for p in [hh, tx, prod]):
             try:
                 total = load_csv_to_db(hh, tx, prod)
-                flash(f'Default data loaded — {total:,} transaction records.', 'success')
+                flash(f'Default data loaded - {total:,} transaction records.', 'success')
             except Exception as e:
                 flash(f'Error: {e}', 'danger')
         else:
@@ -492,7 +492,7 @@ def api_children_spend():
                     'values': [r['avg_spend'] for r in rows]})
 
 
-# ─── ML — Write-up & CLV ──────────────────────────────────────────────────────
+# ─── ML - Write-up & CLV ──────────────────────────────────────────────────────
 @app.route('/ml-writeup')
 @login_required
 def ml_writeup():
@@ -545,7 +545,7 @@ def ml_writeup():
     return render_template('ml_writeup.html', clv_results=clv_results)
 
 
-# ─── ML — Basket Analysis ─────────────────────────────────────────────────────
+# ─── ML - Basket Analysis ─────────────────────────────────────────────────────
 @app.route('/basket-analysis')
 @login_required
 def basket_analysis():
@@ -623,7 +623,7 @@ def basket_analysis():
                            error=None)
 
 
-# ─── ML — Churn Prediction ────────────────────────────────────────────────────
+# ─── ML - Churn Prediction ────────────────────────────────────────────────────
 @app.route('/churn-prediction')
 @login_required
 def churn_prediction():
@@ -824,7 +824,7 @@ Relationships:
   transactions.product_num → products.product_num
 
 Notes:
-  - This is T-SQL (SQL Server). Use SELECT TOP n ... — never use LIMIT.
+  - This is T-SQL (SQL Server). Use SELECT TOP n ... - never use LIMIT.
   - purchase_date is a DATE column.
   - loyalty_flag: 'Y' or 'N' | brand_type: 'PRIVATE' or 'NATIONAL'
   - natural_organic_flag: 'Y' or 'N'
